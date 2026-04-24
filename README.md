@@ -29,12 +29,17 @@ uvicorn app.main:app --reload
 - `項目`
 - `評核標準`（若無此欄，系統會使用除 `項目` 之外的第一個欄位）
 
+## 模式切換（A/B）
+- `mode=batch`：單次全集中（所有欄位一次呼叫 LLM）
+- `mode=per_field`：多次逐欄（每個欄位各呼叫一次 LLM）
+
 ## API
 ### 1) 同步評核
 `POST /api/evaluate`
 - form-data:
   - `report_file`: Excel
   - `criteria_file`: Excel
+  - `mode`: `batch` 或 `per_field`
 
 ### 2) 非同步評核（前端建議）
 1. `POST /api/evaluate/start` 建立任務，回傳 `job_id`

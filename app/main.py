@@ -6,7 +6,7 @@ from typing import Any
 from uuid import uuid4
 
 import pandas as pd
-from fastapi import BackgroundTasks, FastAPI, File, HTTPException, UploadFile
+from fastapi import BackgroundTasks, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -83,7 +83,7 @@ def _set_job(job_id: str, *, status: str, progress: int, message: str, result: d
     )
 
 
-def _process_job(job_id: str, report_bytes: bytes, criteria_bytes: bytes) -> None:
+def _process_job(job_id: str, report_bytes: bytes, criteria_bytes: bytes, mode: str) -> None:
     try:
         _set_job(job_id, status="running", progress=10, message="正在解析 8D 報告 Excel...")
         report_map = _read_excel_mapping(report_bytes, "原始內容")
@@ -96,7 +96,12 @@ def _process_job(job_id: str, report_bytes: bytes, criteria_bytes: bytes) -> Non
             raise HTTPException(status_code=400, detail=f"評核標準缺少項目: {missing}")
 
         _set_job(job_id, status="running", progress=45, message="資料檢查完成，準備呼叫 GPT-5.4...")
-        result = evaluate_8d_report(report_map, criteria_map)
+        result = evaluate_8d_report(
+            report_map,
+            criteria_map,
+            mode=mode,
+            progress_cb=lambda p, m: _set_job(job_id, status="running", progress=p, message=m),
+        )
 
         _set_job(job_id, status="running", progress=85, message="AI 回覆完成，正在整理欄位結果...")
         result = _enrich_with_original_content(result, report_map)
@@ -112,6 +117,7 @@ def _process_job(job_id: str, report_bytes: bytes, criteria_bytes: bytes) -> Non
 async def evaluate(
     report_file: UploadFile = File(..., description="8D報告內容 Excel"),
     criteria_file: UploadFile = File(..., description="評核標準 Excel"),
+    mode: str = Form("batch"),
 ) -> dict[str, Any]:
     if not os.getenv("OPENAI_API_KEY"):
         raise HTTPException(status_code=500, detail="伺服器未設定 OPENAI_API_KEY。")
@@ -120,6 +126,9 @@ async def evaluate(
         raise HTTPException(status_code=400, detail="report_file 需為 Excel 檔案。")
     if not criteria_file.filename.lower().endswith((".xlsx", ".xls")):
         raise HTTPException(status_code=400, detail="criteria_file 需為 Excel 檔案。")
+
+    if mode not in {"batch", "per_field"}:
+        raise HTTPException(status_code=400, detail="mode 僅支援 batch 或 per_field")
 
     report_bytes = await report_file.read()
     criteria_bytes = await criteria_file.read()
@@ -132,7 +141,7 @@ async def evaluate(
         raise HTTPException(status_code=400, detail=f"評核標準缺少項目: {missing}")
 
     try:
-        result = evaluate_8d_report(report_map, criteria_map)
+        result = evaluate_8d_report(report_map, criteria_map, mode=mode)
         return _enrich_with_original_content(result, report_map)
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(status_code=500, detail=f"AI 評核失敗: {exc}") from exc
@@ -143,6 +152,7 @@ async def evaluate_start(
     background_tasks: BackgroundTasks,
     report_file: UploadFile = File(..., description="8D報告內容 Excel"),
     criteria_file: UploadFile = File(..., description="評核標準 Excel"),
+    mode: str = Form("batch"),
 ) -> dict[str, str]:
     if not os.getenv("OPENAI_API_KEY"):
         raise HTTPException(status_code=500, detail="伺服器未設定 OPENAI_API_KEY。")
@@ -151,6 +161,9 @@ async def evaluate_start(
         raise HTTPException(status_code=400, detail="report_file 需為 Excel 檔案。")
     if not criteria_file.filename.lower().endswith((".xlsx", ".xls")):
         raise HTTPException(status_code=400, detail="criteria_file 需為 Excel 檔案。")
+
+    if mode not in {"batch", "per_field"}:
+        raise HTTPException(status_code=400, detail="mode 僅支援 batch 或 per_field")
 
     report_bytes = await report_file.read()
     criteria_bytes = await criteria_file.read()
@@ -161,9 +174,10 @@ async def evaluate_start(
         "progress": 0,
         "message": "任務已建立，等待處理...",
         "result": None,
+        "mode": mode,
     }
 
-    background_tasks.add_task(_process_job, job_id, report_bytes, criteria_bytes)
+    background_tasks.add_task(_process_job, job_id, report_bytes, criteria_bytes, mode)
     return {"job_id": job_id}
 
 

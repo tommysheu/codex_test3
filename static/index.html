@@ -85,6 +85,16 @@
           </div>
         </div>
 
+        <div class="row">
+          <div class="fileBox">
+            <label>評核模式（A/B 測試）</label>
+            <select id="modeSelect" style="width:100%;padding:8px;border:1px solid #aac2ef;border-radius:8px;">
+              <option value="batch">單次全集中（一次呼叫 LLM）</option>
+              <option value="per_field">多次逐欄（每欄呼叫一次 LLM）</option>
+            </select>
+          </div>
+        </div>
+
         <button id="runBtn">開始 AI 評核</button>
         <div class="statusWrap">
           <span class="badge" id="status">尚未開始</span>
@@ -104,6 +114,7 @@
       const resultEl = document.getElementById('result');
       const resultCard = document.getElementById('resultCard');
       const progressInner = document.getElementById('progressInner');
+      const modeSelect = document.getElementById('modeSelect');
 
       function setStatus(text, progress = 0) {
         statusEl.textContent = text;
@@ -173,8 +184,9 @@
           const form = new FormData();
           form.append('report_file', reportFile);
           form.append('criteria_file', criteriaFile);
+          form.append('mode', modeSelect.value);
 
-          setStatus('任務建立中...', 3);
+          setStatus(`任務建立中（模式：${modeSelect.value}）...`, 3);
           const startRes = await fetch('/api/evaluate/start', { method: 'POST', body: form });
           const startBody = await startRes.json();
           if (!startRes.ok) throw new Error(startBody.detail || '任務建立失敗');
