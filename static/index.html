@@ -1,0 +1,107 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI 8D 報告智能評核</title>
+    <style>
+      body { font-family: Arial, sans-serif; margin: 24px; line-height: 1.5; }
+      .card { max-width: 960px; margin: auto; border: 1px solid #ccc; border-radius: 12px; padding: 20px; }
+      h1 { margin-top: 0; }
+      .row { display: flex; gap: 12px; flex-wrap: wrap; }
+      .row > div { flex: 1; min-width: 280px; }
+      input[type="file"] { width: 100%; }
+      button { margin-top: 12px; padding: 10px 16px; cursor: pointer; }
+      table { width: 100%; border-collapse: collapse; margin-top: 20px; }
+      th, td { border: 1px solid #ddd; padding: 8px; vertical-align: top; }
+      th { background: #f4f4f4; }
+      .muted { color: #666; }
+      pre { background: #f9f9f9; padding: 12px; border-radius: 8px; white-space: pre-wrap; }
+    </style>
+  </head>
+  <body>
+    <div class="card">
+      <h1>AI 8D 報告智能評核 Prototype</h1>
+      <p class="muted">上傳 8D 報告 Excel 與評核標準 Excel，系統將呼叫 GPT-4o 進行欄位對欄位評核。</p>
+
+      <div class="row">
+        <div>
+          <label>8D 報告內容（Excel）</label>
+          <input id="reportFile" type="file" accept=".xlsx,.xls" />
+        </div>
+        <div>
+          <label>評核標準（Excel）</label>
+          <input id="criteriaFile" type="file" accept=".xlsx,.xls" />
+        </div>
+      </div>
+
+      <button id="runBtn">執行 AI 評核</button>
+      <p id="status" class="muted"></p>
+
+      <div id="result"></div>
+    </div>
+
+    <script>
+      const runBtn = document.getElementById('runBtn');
+      const statusEl = document.getElementById('status');
+      const resultEl = document.getElementById('result');
+
+      function renderResult(data) {
+        const rows = data.field_results
+          .map((r) => `
+            <tr>
+              <td>${r.field}</td>
+              <td>${r.score}</td>
+              <td>${r.comment ?? ''}</td>
+              <td><ul>${(r.gap_suggestions || []).map((g) => `<li>${g}</li>`).join('')}</ul></td>
+            </tr>
+          `)
+          .join('');
+
+        resultEl.innerHTML = `
+          <table>
+            <thead>
+              <tr>
+                <th>欄位</th>
+                <th>分數 (0-20)</th>
+                <th>評語</th>
+                <th>缺失建議</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+          <h3>Overall Summary</h3>
+          <pre>${data.overall_summary || ''}</pre>
+        `;
+      }
+
+      runBtn.addEventListener('click', async () => {
+        const reportFile = document.getElementById('reportFile').files[0];
+        const criteriaFile = document.getElementById('criteriaFile').files[0];
+
+        if (!reportFile || !criteriaFile) {
+          statusEl.textContent = '請先選擇兩份 Excel 檔案。';
+          return;
+        }
+
+        const form = new FormData();
+        form.append('report_file', reportFile);
+        form.append('criteria_file', criteriaFile);
+
+        statusEl.textContent = '評核中，請稍候...';
+        resultEl.innerHTML = '';
+
+        try {
+          const res = await fetch('/api/evaluate', { method: 'POST', body: form });
+          const body = await res.json();
+          if (!res.ok) throw new Error(body.detail || 'API Error');
+
+          renderResult(body);
+          statusEl.textContent = '評核完成。';
+        } catch (err) {
+          statusEl.textContent = `評核失敗：${err.message}`;
+        }
+      });
+    </script>
+  </body>
+</html>
