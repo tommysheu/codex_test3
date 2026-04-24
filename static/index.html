@@ -1,0 +1,206 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>AI 8D 報告智能評核</title>
+    <style>
+      :root {
+        --bg: #f2f6ff;
+        --card: #ffffff;
+        --line: #d8e1f2;
+        --text: #21304a;
+        --muted: #5c6b86;
+        --primary: #3b82f6;
+        --primary-deep: #1d4ed8;
+      }
+      * { box-sizing: border-box; }
+      body {
+        margin: 0;
+        font-family: Inter, "Noto Sans TC", Arial, sans-serif;
+        background: radial-gradient(circle at top left, #dbeafe, var(--bg));
+        color: var(--text);
+      }
+      .container { max-width: 1100px; margin: 24px auto; padding: 0 16px; }
+      .card {
+        background: var(--card);
+        border: 1px solid var(--line);
+        border-radius: 16px;
+        box-shadow: 0 8px 24px rgba(32, 57, 108, 0.08);
+        padding: 20px;
+        margin-bottom: 18px;
+      }
+      h1 { margin: 0 0 8px; font-size: 1.8rem; }
+      p { margin: 0; }
+      .muted { color: var(--muted); }
+      .row { display: grid; gap: 14px; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); margin-top: 16px; }
+      .fileBox { border: 1px dashed #aac2ef; border-radius: 12px; padding: 12px; background: #f8fbff; }
+      label { display: block; font-weight: 600; margin-bottom: 8px; }
+      input[type="file"] { width: 100%; }
+      button {
+        margin-top: 14px;
+        border: none;
+        border-radius: 10px;
+        background: linear-gradient(90deg, var(--primary), var(--primary-deep));
+        color: white;
+        padding: 10px 18px;
+        font-size: 1rem;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      button:disabled { background: #9db3d8; cursor: not-allowed; }
+      .statusWrap { margin-top: 14px; }
+      .progressBar {
+        width: 100%; height: 10px; border-radius: 999px; background: #e5edfc;
+        overflow: hidden; margin-top: 6px;
+      }
+      .progressInner {
+        height: 100%; width: 0%; background: linear-gradient(90deg, #22c55e, #10b981); transition: width .4s ease;
+      }
+      table { width: 100%; border-collapse: collapse; margin-top: 8px; }
+      th, td { border: 1px solid var(--line); padding: 10px; vertical-align: top; }
+      th { background: #eef4ff; }
+      pre { background: #f6f9ff; border: 1px solid var(--line); border-radius: 10px; padding: 12px; white-space: pre-wrap; }
+      ul { margin: 0; padding-left: 20px; }
+      .badge {
+        display: inline-block; border-radius: 999px; padding: 4px 10px; font-size: 12px; font-weight: 600;
+        background: #e0edff; color: #1e3a8a;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="container">
+      <div class="card">
+        <h1>AI 8D 報告智能評核</h1>
+        <p class="muted">AI 新功能 Fast Prototyping：上傳兩份 Excel，系統將使用 GPT-5.4 進行欄位對欄位評核。</p>
+
+        <div class="row">
+          <div class="fileBox">
+            <label>8D 報告內容（Excel）</label>
+            <input id="reportFile" type="file" accept=".xlsx,.xls" />
+          </div>
+          <div class="fileBox">
+            <label>評核標準（Excel）</label>
+            <input id="criteriaFile" type="file" accept=".xlsx,.xls" />
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="fileBox">
+            <label>評核模式（A/B 測試）</label>
+            <select id="modeSelect" style="width:100%;padding:8px;border:1px solid #aac2ef;border-radius:8px;">
+              <option value="batch">單次全集中（一次呼叫 LLM）</option>
+              <option value="per_field">多次逐欄（每欄呼叫一次 LLM）</option>
+            </select>
+          </div>
+        </div>
+
+        <button id="runBtn">開始 AI 評核</button>
+        <div class="statusWrap">
+          <span class="badge" id="status">尚未開始</span>
+          <div class="progressBar"><div class="progressInner" id="progressInner"></div></div>
+        </div>
+      </div>
+
+      <div class="card" id="resultCard" style="display:none">
+        <h2>評核結果</h2>
+        <div id="result"></div>
+      </div>
+    </div>
+
+    <script>
+      const runBtn = document.getElementById('runBtn');
+      const statusEl = document.getElementById('status');
+      const resultEl = document.getElementById('result');
+      const resultCard = document.getElementById('resultCard');
+      const progressInner = document.getElementById('progressInner');
+      const modeSelect = document.getElementById('modeSelect');
+
+      function setStatus(text, progress = 0) {
+        statusEl.textContent = text;
+        progressInner.style.width = `${Math.max(0, Math.min(100, progress))}%`;
+      }
+
+      function renderResult(data) {
+        const rows = data.field_results
+          .map((r) => `
+            <tr>
+              <td>${r.field}</td>
+              <td>${r.original_content || ''}</td>
+              <td>${r.score}</td>
+              <td>${r.comment ?? ''}</td>
+              <td><ul>${(r.gap_suggestions || []).map((g) => `<li>${g}</li>`).join('')}</ul></td>
+            </tr>
+          `)
+          .join('');
+
+        resultEl.innerHTML = `
+          <table>
+            <thead>
+              <tr>
+                <th>欄位</th>
+                <th>原報告內容</th>
+                <th>分數 (0-20)</th>
+                <th>評語</th>
+                <th>缺失建議</th>
+              </tr>
+            </thead>
+            <tbody>${rows}</tbody>
+          </table>
+          <h3>Overall Summary</h3>
+          <pre>${data.overall_summary || ''}</pre>
+        `;
+        resultCard.style.display = 'block';
+      }
+
+      async function pollJob(jobId) {
+        while (true) {
+          const res = await fetch(`/api/evaluate/status/${jobId}`);
+          const body = await res.json();
+          if (!res.ok) throw new Error(body.detail || '查詢任務狀態失敗');
+
+          setStatus(body.message || body.status, body.progress || 0);
+
+          if (body.status === 'completed') return body.result;
+          if (body.status === 'failed') throw new Error(body.message || '評核失敗');
+          await new Promise((resolve) => setTimeout(resolve, 900));
+        }
+      }
+
+      runBtn.addEventListener('click', async () => {
+        const reportFile = document.getElementById('reportFile').files[0];
+        const criteriaFile = document.getElementById('criteriaFile').files[0];
+
+        if (!reportFile || !criteriaFile) {
+          setStatus('請先選擇兩份 Excel 檔案。', 0);
+          return;
+        }
+
+        runBtn.disabled = true;
+        resultEl.innerHTML = '';
+        resultCard.style.display = 'none';
+
+        try {
+          const form = new FormData();
+          form.append('report_file', reportFile);
+          form.append('criteria_file', criteriaFile);
+          form.append('mode', modeSelect.value);
+
+          setStatus(`任務建立中（模式：${modeSelect.value}）...`, 3);
+          const startRes = await fetch('/api/evaluate/start', { method: 'POST', body: form });
+          const startBody = await startRes.json();
+          if (!startRes.ok) throw new Error(startBody.detail || '任務建立失敗');
+
+          setStatus('任務已建立，準備開始...', 8);
+          const result = await pollJob(startBody.job_id);
+          renderResult(result);
+          setStatus('評核完成 ✅', 100);
+        } catch (err) {
+          setStatus(`評核失敗：${err.message}`, 100);
+        } finally {
+          runBtn.disabled = false;
+        }
+      });
+    </script>
+  </body>
+</html>
