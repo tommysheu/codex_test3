@@ -22,8 +22,9 @@ def _build_prompt(report_map: dict[str, str], criteria_map: dict[str, str]) -> s
 
     return (
         "你是資深 SQE/品質系統稽核專家。請根據每個欄位對應評核標準，"
-        "評分並提供精簡、可執行的改善建議。\n"
+        "評分並提供詳細、可執行的改善建議。\n"
         "分數範圍為 0~20 且需符合標準分級描述。\n"
+        "請針對每個欄位至少提供 3 點 gap_suggestions，且每點都要具體到可落地執行。\n"
         "請只輸出 JSON，格式如下：\n"
         "{\n"
         '  "field_results": [\n'
@@ -31,7 +32,7 @@ def _build_prompt(report_map: dict[str, str], criteria_map: dict[str, str]) -> s
         '      "field": "欄位名稱",\n'
         '      "score": 0,\n'
         '      "comment": "評語",\n'
-        '      "gap_suggestions": ["建議1", "建議2"]\n'
+        '      "gap_suggestions": ["建議1", "建議2", "建議3"]\n'
         "    }\n"
         "  ],\n"
         '  "overall_summary": "整體總結"\n'
@@ -52,7 +53,7 @@ def evaluate_8d_report(report_map: dict[str, str], criteria_map: dict[str, str])
             "Content-Type": "application/json",
         },
         json={
-            "model": "gpt-4o",
+            "model": "gpt-5.4",
             "temperature": 0.2,
             "response_format": {"type": "json_object"},
             "messages": [
@@ -71,7 +72,6 @@ def evaluate_8d_report(report_map: dict[str, str], criteria_map: dict[str, str])
     content = body["choices"][0]["message"]["content"]
     data = json.loads(content)
 
-    # basic schema guard
     if "field_results" not in data or "overall_summary" not in data:
         raise ValueError("AI 回傳格式不正確")
 
